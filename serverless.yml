@@ -17,6 +17,10 @@ provider:
         - dynamodb:GetItem
       Resource:
         - "Fn::GetAtt": [ UsersTable, Arn ]
+
+plugins: 
+  - serverless-offline
+  - serverless-apigateway-service-proxy
 # you can overwrite defaults here
 #  stage: dev
 #  region: us-east-1
@@ -139,12 +143,6 @@ custom:
           attributeType: S
         action: GetItem # specify action to the table what you want
         condition: attribute_not_exists(Id) # optional Condition Expressions parameter for the table
-        cors: true
-    - dynamodb:
-        path: /users
-        method: get
-        tableName: {Ref: UsersTable}
-        action: GetItem
         cors: true
 #  Outputs:
 #     NewOutput:
