@@ -8,6 +8,8 @@ provider:
   runtime: nodejs18.x
   region: 'ap-south-1'
   stage: dev
+  environment:
+    USERS_TABLE_NAME: users
   iamRoleStatements:
     - Effect: Allow
       Action:
@@ -97,8 +99,83 @@ functions:
 #    environment:
 #      variable2: value2
 
+
+
 resources:
  Resources:
+  APIRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+         - Effect: Allow
+           Principal:
+             Service:
+             - apigateway.amazonaws.com
+           Action:
+            - sts:AssumeRole
+      Policies:
+       - PolicyName: APIPolicy
+         PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+              - "dynamodb:PutItem"
+              - "dynamodb:UpdateItem"
+              - "dynamodb:DeleteItem"
+              - "dynamodb:GetItem"
+              - "dynamodb:Scan"
+              Resource: !GetAtt UsersTable.Arn
+  UserRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: Rest API for Users
+      Name: users-rest-api
+  UserApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: {Ref : "UserRestApi"}
+      ParentId: !GetAtt 
+        - UserRestApi
+        - RootResourceId
+      PathPart: users
+  # UsersApiRequestModel:
+  #   Type: 'AWS::ApiGateway::Model'
+  #   Properties:
+  #     RestApiId: { Ref: "UserRestApi" }
+  #     ContentType: application/json
+  #     Description: Schema for Pets example
+  #     Name: UsersFetchModel
+  #     Schema:
+  #       $schema: 'http://json-schema.org/draft-04/schema#'
+  #       title: usersFetchObject
+  #       type: object
+  #       properties: {
+  #         TableName:
+  #       }
+  UsersApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: {Ref : "UserRestApi"}
+      ResourceId: {Ref: "UserApiResource"}
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      MethodResponses: [{"StatusCode":"200"}]
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: GET
+        Uri: { 'Fn::Sub': 'arn:aws:apigateway:${AWS::Region}:dynamodb:action/Scan' }
+        Credentials: !GetAtt APIRole.Arn
+        RequestTemplates:
+          {
+            application/json: "{
+              TableName: users
+            }"
+          }
+        
+
   UsersTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -106,28 +183,17 @@ resources:
       AttributeDefinitions:
         - AttributeName: uuid
           AttributeType: S
-        - AttributeName: firstName 
-          AttributeType: S
-        - AttributeName: lastName
-          AttributeType: S
-        - AttributeName: email
-          AttributeType: S
-        - AttributeName: phoneNumber
-          AttributeType: S
         - AttributeName: country
           AttributeType: S
       KeySchema:
-        - 
-          AttributeName: uuid 
+        - AttributeName: uuid 
           KeyType: HASH
-      ProvisionedThroughput:
-        ReadCapacityUnits: 1
-        WriteCapacityUnits: 1
+      BillingMode: PAY_PER_REQUEST
       GlobalSecondaryIndexes:
         - IndexName: country-index
           KeySchema:
             - AttributeName: country
-              KeyType: S
+              KeyType: HASH
           Projection:
             ProjectionType: ALL
               
@@ -135,14 +201,13 @@ resources:
 custom:
   apiGatewayServiceProxies:
     - dynamodb:
-        path: /users/{id}
+        path: /user/{uuid}
         method: get
         tableName: { Ref: 'UsersTable' }
         hashKey: # set pathParam or queryStringParam as a partitionkey.
-          pathParam: id
+          pathParam: uuid
           attributeType: S
         action: GetItem # specify action to the table what you want
-        condition: attribute_not_exists(Id) # optional Condition Expressions parameter for the table
         cors: true
 #  Outputs:
 #     NewOutput:
