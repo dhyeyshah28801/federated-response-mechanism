@@ -127,10 +127,16 @@ resources:
               - "dynamodb:DeleteItem"
               - "dynamodb:GetItem"
               - "dynamodb:Scan"
-              Resource: !GetAtt UsersTable.Arn
+              - "dynamodb:Query"
+              Resource: 
+              - !GetAtt UsersTable.Arn
+              - "Fn::Join": ['/', ["Fn::GetAtt": [ UsersTable, Arn ], 'index', '*']]
   UserRestApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
       Description: Rest API for Users
       Name: users-rest-api
   UserApiResource:
@@ -140,7 +146,16 @@ resources:
       ParentId: !GetAtt 
         - UserRestApi
         - RootResourceId
-      PathPart: users
+      PathPart: "users"
+  UserCountryResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: {Ref : "UserRestApi"}
+      ParentId: !GetAtt
+        - UserRestApi
+        - RootResourceId
+      PathPart: '{country}'
+
   # UsersApiRequestModel:
   #   Type: 'AWS::ApiGateway::Model'
   #   Properties:
@@ -155,26 +170,61 @@ resources:
   #       properties: {
   #         TableName:
   #       }
+
   UsersApiMethod:
     Type: AWS::ApiGateway::Method
     Properties:
       RestApiId: {Ref : "UserRestApi"}
       ResourceId: {Ref: "UserApiResource"}
-      HttpMethod: OPTIONS
+      HttpMethod: GET
+      MethodResponses:
+      - StatusCode: "200"
       AuthorizationType: NONE
-      MethodResponses: [{"StatusCode":"200"}]
       Integration:
+        IntegrationResponses:
+        - ResponseTemplates:
+            application/json: |
+              #set($inputRoot = $input.path('$'))
+              [
+                "input": $inputRoot.Items
+              ]
+          StatusCode: "200"
         Type: AWS
-        IntegrationHttpMethod: GET
-        Uri: { 'Fn::Sub': 'arn:aws:apigateway:${AWS::Region}:dynamodb:action/Scan' }
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:dynamodb:action/Scan'
         Credentials: !GetAtt APIRole.Arn
-        RequestTemplates:
-          {
-            application/json: "{
-              TableName: users
-            }"
-          }
-        
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestTemplates: 
+          application/json: "{\"TableName\": \"users\"}"
+  
+  UserGetByCountryMethod:
+    Type: AWS::ApiGateway::Method
+    Properties: 
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Credentials: !GetAtt APIRole.Arn
+        IntegrationHttpMethod: POST
+        IntegrationResponses:
+        - ResponseTemplates:
+            application/json: |
+              #set($inputRoot = $input.path('$'))
+              [
+                  #foreach($elem in $inputRoot.Items) {
+                      "users": "$elem",
+                  }#if($foreach.hasNext),#end
+                  #end
+              ]
+          StatusCode: "200"
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestTemplates: 
+          application/json: "#set($country = \"$input.params('country')\")\n{\"TableName\":\"users\",\"IndexName\":\"country-index\",\"KeyConditionExpression\":\"country=:v1\",\"ExpressionAttributeValues\":{\":v1\":{\"S\":\"$country\"}}}}"
+        Type: AWS
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:dynamodb:action/Query"
+      MethodResponses:
+        - StatusCode: "200"
+      ResourceId: !Ref UserCountryResource
+      RestApiId: !Ref UserRestApi    
 
   UsersTable:
     Type: AWS::DynamoDB::Table
@@ -208,8 +258,7 @@ custom:
           pathParam: uuid
           attributeType: S
         action: GetItem # specify action to the table what you want
-        cors: true
-#  Outputs:
-#     NewOutput:
-#       Description: "Description for the output"
-#       Value: "Some output value"
+# Outputs:
+#   Url:
+#    Description: Endpoint URL
+#    Value: !Sub https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
